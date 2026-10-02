@@ -39,10 +39,8 @@
 static struct
 {
 	uint8_t ep_in;
-	uint8_t ep_out;
 	volatile bool in_use;
 	uint8_t in_buf[XINPUT_REPORT_LEN];
-	volatile bool tx_pending;
 } s_xi;
 
 uint16_t xinput_interface_desc_len(void)
@@ -106,9 +104,7 @@ void xinput_send(uint16_t buttons, uint8_t lt, uint8_t rt, int16_t lx,
 	memset(r + 14, 0, XINPUT_REPORT_LEN - 14);
 
 	if (usbd_edpt_claim(0, s_xi.ep_in)) {
-		if (usbd_edpt_xfer(0, s_xi.ep_in, s_xi.in_buf, XINPUT_REPORT_LEN))
-			s_xi.tx_pending = false;
-		else
+		if (!usbd_edpt_xfer(0, s_xi.ep_in, s_xi.in_buf, XINPUT_REPORT_LEN))
 			usbd_edpt_release(0, s_xi.ep_in);
 	}
 }
@@ -125,7 +121,6 @@ static void xi_reset(uint8_t rhport)
 	(void)rhport;
 	s_xi.in_use = false;
 	s_xi.ep_in = 0;
-	s_xi.ep_out = 0;
 }
 
 static uint16_t xi_open(uint8_t rhport, tusb_desc_interface_t const *itf,
@@ -143,19 +138,13 @@ static uint16_t xi_open(uint8_t rhport, tusb_desc_interface_t const *itf,
 	if (max_len < total)
 		return 0;
 
-	uint8_t itfnum = itf->bInterfaceNumber;
 	uint8_t const *p = (uint8_t const *)itf + sizeof(tusb_desc_interface_t);
 	uint16_t remaining = total - sizeof(tusb_desc_interface_t);
 
 	/*
-		Walk the class-specific blob and the endpoints. The blob has to be
-		skipped by its own bLength rather than assumed to be 17 bytes, because
-		that is the only length the host actually declared.
-	*/
-	/*
 		Descriptors carry their own length in the first byte, which is the only
-		reliable way to walk them: the class-specific blob does not have a fixed
-		size in the specification.
+		reliable way to walk them: the class-specific blob has no fixed size in
+		the specification, so its bLength is what decides where it ends.
 	*/
 	while (remaining >= 2)
 	{
@@ -166,21 +155,18 @@ static uint16_t xi_open(uint8_t rhport, tusb_desc_interface_t const *itf,
 
 		if (type == TUSB_DESC_ENDPOINT)
 		{
-			tusb_desc_endpoint_t const *ep = (tusb_desc_endpoint_t const *)d;
+			tusb_desc_endpoint_t const *ep = (tusb_desc_endpoint_t const *)p;
 			uint8_t addr = ep->bEndpointAddress;
 			if (ep->bmAttributes.xfer == TUSB_XFER_INTERRUPT)
 				usbd_edpt_open(rhport, ep);
 			if (addr & TUSB_DIR_IN_MASK)
 				s_xi.ep_in = addr;
-			else
-				s_xi.ep_out = addr;
 		}
 
 		p += len;
 		remaining -= (uint16_t)len;
 	}
 
-	(void)itfnum;
 	s_xi.in_use = true;
 	return total;
 }
