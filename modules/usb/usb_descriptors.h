@@ -19,6 +19,31 @@
 #define USB_POLLING_INTERVAL 1 // Do not modify - knob filtering algorithm depends on this
 
 //--------------------------------------------------------------------+
+// Presentation Modes
+//--------------------------------------------------------------------+
+
+// The composite descriptor (Keyboard + Mouse + Gamepad + RawHID) is what the
+// PC tooling expects, but iOS refuses a multi-interface device as a gamepad:
+// IOHIDFamily only accepts a single, bare "Game Pad" HID interface. When the
+// firmware runs in gamepad mode it therefore enumerates as this stripped-down
+// one-interface device, which PC hosts accept as well.
+enum
+{
+	USB_PRESENTATION_COMPOSITE,
+	USB_PRESENTATION_GAMEPAD_ONLY,
+};
+
+// Selected before USB enumeration starts (i.e. before tud_task() runs) and
+// never changed afterwards: TinyUSB cannot rebuild the configuration descriptor
+// of an already mounted device.
+void usb_descriptors_set_presentation(uint8_t presentation);
+uint8_t usb_descriptors_get_presentation(void);
+
+// Interface number of the gamepad/HID interface reporting in the active
+// presentation: 2 in the composite descriptor, 0 in the gamepad-only one.
+uint8_t usb_descriptors_gamepad_itf(void);
+
+//--------------------------------------------------------------------+
 // Enums
 //--------------------------------------------------------------------+
 

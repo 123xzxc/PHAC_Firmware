@@ -2,6 +2,23 @@
 #include "tusb.h"
 #include "usb_descriptors.h"
 
+static uint8_t s_presentation = USB_PRESENTATION_COMPOSITE;
+
+void usb_descriptors_set_presentation(uint8_t presentation)
+{
+	s_presentation = presentation;
+}
+
+uint8_t usb_descriptors_get_presentation(void)
+{
+	return s_presentation;
+}
+
+uint8_t usb_descriptors_gamepad_itf(void)
+{
+	return s_presentation == USB_PRESENTATION_GAMEPAD_ONLY ? 0 : INTERFACE_GAMEPAD;
+}
+
 //--------------------------------------------------------------------+
 // Device Descriptors - Core USB device properties
 //--------------------------------------------------------------------+
@@ -57,6 +74,13 @@ uint8_t const desc_hid_rawhid[] =
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf)
 {
+	// In the gamepad-only presentation the single HID interface is the gamepad,
+	// so it answers on itf 0 instead of INTERFACE_GAMEPAD.
+	if (s_presentation == USB_PRESENTATION_GAMEPAD_ONLY)
+	{
+		return itf == 0 ? desc_hid_gamepad : NULL;
+	}
+
 	if (itf == 0)
 	{
 		return desc_hid_keyboard;
@@ -82,6 +106,10 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t itf)
 
 #define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN +3 * TUD_HID_DESC_LEN + TUD_HID_INOUT_DESC_LEN)
 
+// Gamepad-only presentation: one HID interface carrying the same gamepad report
+// descriptor. This is the shape iOS accepts as a controller.
+#define CONFIG_TOTAL_LEN_GAMEPAD (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+
 uint8_t const desc_configuration[] =
 		{
 				// Config number, interface count, string index, total length, attribute, power in mA
@@ -93,12 +121,25 @@ uint8_t const desc_configuration[] =
 				TUD_HID_DESCRIPTOR(INTERFACE_GAMEPAD, 6, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_gamepad), EPNUM_GAMEPAD, CFG_TUD_HID_EP_BUFSIZE, USB_POLLING_INTERVAL),
 				TUD_HID_INOUT_DESCRIPTOR(INTERFACE_RAWHID, 7, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_rawhid), EPNUM_RAWHID, 0x80 | EPNUM_RAWHID, CFG_TUD_HID_EP_BUFSIZE, USB_POLLING_INTERVAL)};
 
+// Single-interface descriptor used in gamepad mode so iOS recognises the device.
+// EPNUM_GAMEPAD (0x83) is kept so the report path is identical to the composite
+// build; only the interface numbering changes.
+uint8_t const desc_configuration_gamepad[] =
+		{
+				TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN_GAMEPAD, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+
+				TUD_HID_DESCRIPTOR(0, STRID_HID_GAMEPAD, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_gamepad), EPNUM_GAMEPAD, CFG_TUD_HID_EP_BUFSIZE, USB_POLLING_INTERVAL)};
+
 // Invoked when received GET CONFIGURATION DESCRIPTOR
 // Application return pointer to descriptor
 // Descriptor contents must exist long enough for transfer to complete
 uint8_t const *tud_descriptor_configuration_cb(uint8_t index)
 {
 	(void)index; // for multiple configurations
+	if (s_presentation == USB_PRESENTATION_GAMEPAD_ONLY)
+	{
+		return desc_configuration_gamepad;
+	}
 	return desc_configuration;
 }
 

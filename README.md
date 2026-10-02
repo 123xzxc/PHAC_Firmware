@@ -5,6 +5,12 @@
 - **Keyboard/Mouse Mode**: 7 customizable buttons + dual-knob mouse control
 - **Gamepad Mode**: HID gamepad with dual analog axes
 
+> **iOS / iPadOS**: gamepad mode enumerates as a **single-interface HID gamepad**
+> so iOS recognises it. iOS (IOHIDFamily) rejects a controller that shares one
+> USB device with keyboard, mouse and vendor interfaces, so the composite
+> descriptor is only used in keyboard/mouse mode. A mode change therefore needs
+> a re-plug (or a host-requested reboot) to take effect; see *Mode Switching*.
+
 ####  Advanced Features
 - **Key Remapping**: Online configuration via web tool ([https://keymapper.phdesign.cc/](https://keymapper.phdesign.cc/))
 - **START Button Protection**: Configurable protection time (100ms/250ms/500ms) to prevent accidental presses
@@ -73,6 +79,12 @@ Visit [https://keymapper.phdesign.cc/](PHAC-keymapper) to configure:
 
 **Runtime Switching**:
 - Use web configuration tool to switch modes online
+
+The USB descriptor is fixed while the device is enumerated, so a runtime mode
+change is saved to flash and the firmware reboots to re-enumerate with the new
+presentation. Note that the web configuration tool talks over the RawHID
+interface, which only exists in keyboard/mouse mode -- from gamepad mode switch
+back by holding **Button A** while plugging in.
 
 ###  Project Structure
 

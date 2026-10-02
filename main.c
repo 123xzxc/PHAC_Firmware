@@ -5,6 +5,7 @@
 #include "tusb.h"
 #include "modules/usb/usb_descriptors.h"
 #include "hardware/gpio.h"
+#include "hardware/watchdog.h"
 #include "pico/bootrom.h"
 #include "hardware/flash.h"
 #include "modules/encoder/ec11.h"
@@ -146,6 +147,11 @@ static uint16_t gamepad_y = 0;
 
 static uint32_t prev_btn_state = 0;
 
+// Set when the host asks for a mode change: the USB presentation can only change
+// on re-enumeration, so the reply is sent first and the chip reboots after.
+static bool reboot_pending = false;
+static uint32_t reboot_at_ms = 0;
+
 static float remaining_delta_x = 0.0f;
 static float remaining_delta_y = 0.0f;
 
@@ -269,6 +275,13 @@ int main(void)
 	}
 	current_mode = load_system_mode();
 
+	// The mode decides how the device enumerates, and TinyUSB needs that known
+	// before it builds the configuration descriptor, so there is no runtime
+	// switching of the presentation -- change the mode and replug.
+	usb_descriptors_set_presentation(current_mode == MODE_GAMEPAD
+										 ? USB_PRESENTATION_GAMEPAD_ONLY
+										 : USB_PRESENTATION_COMPOSITE);
+
 	// Initialize buttons with debouncing
 	debounce_init(&app.debounce, app.button_pins);
 	debounce_set_mode(&app.debounce, ASYM_EAGER_DEFER_PK);
@@ -316,6 +329,21 @@ int main(void)
 	{
 		tud_task();
 		handle_rawhid_response();
+
+		// A mode change was acknowledged: give the reply a moment to flush, then
+		// rebooting re-enumerates with the descriptor for the newly saved mode.
+		if (reboot_pending)
+		{
+			if (reboot_at_ms == 0)
+			{
+				reboot_at_ms = board_millis() + 150;
+			}
+			else if ((int32_t)(board_millis() - reboot_at_ms) >= 0)
+			{
+				watchdog_reboot(0, 0, 0);
+			}
+		}
+
 		led_blinking_task();
 		ec11_update(&encoder_x);
 		ec11_update(&encoder_y);
@@ -593,23 +621,31 @@ static void handle_gamepad_mode(uint32_t btn_state)
 	int8_t axis_x = (int8_t)(mapped_x);
 	int8_t axis_y = (int8_t)(mapped_y);
 
-	if (tud_hid_n_ready(ITF_GAMEPAD))
+	// The report descriptor declares hat switch Logical Min 1 / Max 8, so 8 is
+	// the "centred" value. Sending 0 is out of range and makes strict parsers
+	// -- iOS in particular -- drop the whole report.
+	const uint8_t hat_centred = 8;
+
+	if (tud_hid_n_ready(usb_descriptors_gamepad_itf()))
 	{
-		tud_hid_n_gamepad_report(ITF_GAMEPAD, 0,
+		tud_hid_n_gamepad_report(usb_descriptors_gamepad_itf(), 0,
 								 axis_x, // X
 								 axis_y, // Y
 								 0,		 // Z
 								 0,		 // Rz
 								 0,		 // Rx
 								 0,		 // Ry
-								 0,		 // Hat
+								 hat_centred,
 								 gamepad_buttons);
 	}
 }
 
 static void handle_rawhid_response(void)
 {
-	if (send_response && tud_hid_n_ready(ITF_GENERIC))
+	// The RawHID (configuration) interface only exists in the composite
+	// presentation; gamepad mode drops it so iOS sees a bare controller.
+	if (send_response && usb_descriptors_get_presentation() == USB_PRESENTATION_COMPOSITE &&
+		tud_hid_n_ready(ITF_GENERIC))
 	{
 		tud_hid_n_report(ITF_GENERIC, 0, received_data, received_size);
 
@@ -823,6 +859,10 @@ void tud_hid_set_report_cb(
 			received_report_id = report_id;
 			received_itf = itf;
 			send_response = true;
+			if (mode_valid)
+			{
+				reboot_pending = true;
+			}
 			return;
 		}
 		
