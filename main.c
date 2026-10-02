@@ -4,6 +4,7 @@
 #include "bsp/board_api.h"
 #include "tusb.h"
 #include "modules/usb/usb_descriptors.h"
+#include "modules/usb/xinput_device.h"
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
 #include "pico/bootrom.h"
@@ -279,7 +280,7 @@ int main(void)
 	// before it builds the configuration descriptor, so there is no runtime
 	// switching of the presentation -- change the mode and replug.
 	usb_descriptors_set_presentation(current_mode == MODE_GAMEPAD
-										 ? USB_PRESENTATION_GAMEPAD_ONLY
+										 ? USB_PRESENTATION_XINPUT
 										 : USB_PRESENTATION_COMPOSITE);
 
 	// Initialize buttons with debouncing
@@ -614,29 +615,54 @@ static void handle_gamepad_mode(uint32_t btn_state)
 		}
 	}
 
-	// Map encoder positions to gamepad axes  
-	int16_t mapped_x = (int16_t)gamepad_x * 255 / 256 - 255;
-	int16_t mapped_y = (int16_t)gamepad_y * 255 / 256 - 255;
+	// Map encoder positions to gamepad axes
+	//
+	// The encoders run 0..511 for two full turns, and the report wants a
+	// signed 16-bit axis. Both ends of the range are reached at the same
+	// point, so the value is folded into -32768..32767 by centring it on
+	// half the period first.
+	int16_t mapped_x = (int16_t)(((int32_t)gamepad_x - 256) * 255);
+	int16_t mapped_y = (int16_t)(((int32_t)gamepad_y - 256) * 255);
 
-	int8_t axis_x = (int8_t)(mapped_x);
-	int8_t axis_y = (int8_t)(mapped_y);
+	/*
+		The controller's buttons are a contiguous bit range starting at
+		Button 1. XInput orders its own button word differently: the
+		face buttons sit at the top, the shoulders and stick clicks in the
+		middle and the d-pad at the bottom. The default keymap is 0..6,
+		which is the HID order, so it is translated here instead of asking
+		the configuration tool to speak XInput.
+	*/
+	static const uint16_t xinput_button_map[BUTTON_COUNT] = {
+		XB_A,     /* BTN_BTA -> 0 */
+		XB_B,     /* BTN_BTB -> 1 */
+		XB_X,     /* BTN_BTC -> 2 */
+		XB_Y,     /* BTN_BTD -> 3 */
+		XB_LB,    /* BTN_FXL -> 4 */
+		XB_START, /* BTN_START -> 5 */
+		XB_RB,    /* BTN_FXR -> 6 */
+	};
 
-	// The report descriptor declares hat switch Logical Min 1 / Max 8, so 8 is
-	// the "centred" value. Sending 0 is out of range and makes strict parsers
-	// -- iOS in particular -- drop the whole report.
-	const uint8_t hat_centred = 8;
-
-	if (tud_hid_n_ready(usb_descriptors_gamepad_itf()))
+	uint16_t xi_buttons = 0;
+	for (int i = 0; i < BUTTON_COUNT; i++)
 	{
-		tud_hid_n_gamepad_report(usb_descriptors_gamepad_itf(), 0,
-								 axis_x, // X
-								 axis_y, // Y
-								 0,		 // Z
-								 0,		 // Rz
-								 0,		 // Rx
-								 0,		 // Ry
-								 hat_centred,
-								 gamepad_buttons);
+		uint8_t mapped = config->keymap_gamepad[i];
+		if ((gamepad_buttons & (1u << mapped)) && mapped < BUTTON_COUNT)
+		{
+			xi_buttons |= xinput_button_map[i];
+		}
+	}
+
+	/*
+		The knobs are the two analog triggers on a pad, which is what the
+		two analog axes on a 360 controller are. lt/rt are the full-scale
+		values so the host sees the knob as pushed rather than idle.
+	*/
+	uint8_t lt = (mapped_x < 0) ? (uint8_t)(-mapped_x >> 8) : 0;
+	uint8_t rt = (mapped_y > 0) ? (uint8_t)(mapped_y >> 8) : 0;
+
+	if (xinput_ready())
+	{
+		xinput_send(xi_buttons, lt, rt, mapped_x, mapped_y, 0, 0);
 	}
 }
 
@@ -985,3 +1011,4 @@ void update_button_leds(uint32_t btn_state)
 		}
 	}
 }
+

@@ -45,6 +45,7 @@ pico_generate_pio_header(PHAC-Firmware ${CMAKE_CURRENT_LIST_DIR}/modules/encoder
 target_sources(PHAC-Firmware PUBLIC
         ${CMAKE_CURRENT_LIST_DIR}/main.c
         modules/usb/usb_descriptors.c
+        modules/usb/xinput_device.c
         modules/encoder/ec11.c
         modules/debounce/debounce.c
         modules/rgb/ws2812.c

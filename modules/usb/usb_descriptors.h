@@ -12,9 +12,17 @@
 #define USB_PID (0x4000 | _PID_MAP(CDC, 0) | _PID_MAP(MSC, 1) | _PID_MAP(HID, 2) | \
 				 _PID_MAP(MIDI, 3) | _PID_MAP(VENDOR, 4))
 
+// XInput identity. A host that only knows Microsoft's driver stack -- iOS and
+// Windows among them -- binds a wired 360 pad by this pair, not by a HID usage,
+// so gamepad mode has to present exactly it or the device is ignored.
+#define USB_VID_XINPUT 0x045E
+#define USB_PID_XINPUT 0x028E
+
 #define EPNUM_KEYBOARD 0x81
 #define EPNUM_MOUSE 0x82
 #define EPNUM_GAMEPAD 0x83
+#define EPNUM_XINPUT_IN 0x81
+#define EPNUM_XINPUT_OUT 0x01
 #define EPNUM_RAWHID 0x04
 #define USB_POLLING_INTERVAL 1 // Do not modify - knob filtering algorithm depends on this
 
@@ -22,26 +30,20 @@
 // Presentation Modes
 //--------------------------------------------------------------------+
 
-// The composite descriptor (Keyboard + Mouse + Gamepad + RawHID) is what the
-// PC tooling expects, but iOS refuses a multi-interface device as a gamepad:
-// IOHIDFamily only accepts a single, bare "Game Pad" HID interface. When the
-// firmware runs in gamepad mode it therefore enumerates as this stripped-down
-// one-interface device, which PC hosts accept as well.
+// A generic HID gamepad is invisible to hosts that only implement Microsoft's
+// controller stack, so gamepad mode presents the XInput vendor interface
+// instead. The composite personality is what the PC configuration tool talks
+// to and is kept for keyboard/mouse mode.
 enum
 {
 	USB_PRESENTATION_COMPOSITE,
-	USB_PRESENTATION_GAMEPAD_ONLY,
+	USB_PRESENTATION_XINPUT,
 };
 
-// Selected before USB enumeration starts (i.e. before tud_task() runs) and
-// never changed afterwards: TinyUSB cannot rebuild the configuration descriptor
-// of an already mounted device.
+// Selected before enumeration starts and never changed afterwards: TinyUSB
+// builds the configuration descriptor once, when the host asks for it.
 void usb_descriptors_set_presentation(uint8_t presentation);
 uint8_t usb_descriptors_get_presentation(void);
-
-// Interface number of the gamepad/HID interface reporting in the active
-// presentation: 2 in the composite descriptor, 0 in the gamepad-only one.
-uint8_t usb_descriptors_gamepad_itf(void);
 
 //--------------------------------------------------------------------+
 // Enums
@@ -66,6 +68,11 @@ enum
 	STRID_HID_MOUSE,
 	STRID_HID_GAMEPAD,
 	STRID_HID_RAWHID,
+
+	// Gamepad mode strings come after the composite ones so the composite
+	// descriptor keeps its existing indices.
+	STRID_XINPUT_MANUFACTURER,
+	STRID_XINPUT_PRODUCT,
 };
 
 //--------------------------------------------------------------------+
