@@ -652,17 +652,15 @@ static void handle_gamepad_mode(uint32_t btn_state)
 		}
 	}
 
-	/*
-		The knobs are the two analog triggers on a pad, which is what the
-		two analog axes on a 360 controller are. lt/rt are the full-scale
-		values so the host sees the knob as pushed rather than idle.
-	*/
-	uint8_t lt = (mapped_x < 0) ? (uint8_t)(-mapped_x >> 8) : 0;
-	uint8_t rt = (mapped_y > 0) ? (uint8_t)(mapped_y >> 8) : 0;
-
 	if (xinput_ready())
 	{
-		xinput_send(xi_buttons, lt, rt, mapped_x, mapped_y, 0, 0);
+		/*
+			The knobs drive the left stick only. They are deliberately kept
+			off the triggers: a trigger is a one-sided axis that reads as
+			"pressed" the moment the knob leaves centre, which is not what a
+			knob is, and it makes the host see constant trigger input.
+		*/
+		xinput_send(xi_buttons, 0, 0, mapped_x, mapped_y, 0, 0);
 	}
 }
 
